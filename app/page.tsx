@@ -8,12 +8,55 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { hash } from "bcryptjs";
+import { hash, compare } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import crypto from "crypto";
 import LoggedIn from "@/lib/LoggedIn";
+
+async function loginUser(formData: FormData) {
+  "use server";
+  const email = formData.get("email");
+  const password = formData.get("password");
+
+  if (typeof email !== "string" || typeof password !== "string") {
+    throw new Error("Email and password are required and must be strings.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      email: email,
+    },
+  });
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  const isPasswordValid = await compare(password, user.password);
+
+  if (!isPasswordValid) {
+    throw new Error("Invalid password.");
+  }
+
+  const sessionToken = crypto.randomUUID();
+  const cookieStore = await cookies();
+  cookieStore.set("sessionToken", sessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+  });
+  await prisma.session.create({
+    data: {
+      token: sessionToken,
+      userId: user.id,
+    },
+  });
+
+  redirect("/dashboard");
+}
 
 async function registerUser(formData: FormData) {
   "use server";
@@ -96,7 +139,7 @@ export default async function Home() {
               <DialogTitle>Login</DialogTitle>
               <DialogDescription>Please log in to continue.</DialogDescription>
             </DialogHeader>
-            <form className="flex flex-col gap-4 mt-4">
+            <form className="flex flex-col gap-4 mt-4" action={loginUser}>
               <div>
                 <label
                   htmlFor="email"
@@ -106,6 +149,7 @@ export default async function Home() {
                 </label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
                   placeholder="you@example.com"
                   required
@@ -120,6 +164,7 @@ export default async function Home() {
                 </label>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
                   placeholder="••••••••"
                   required
